@@ -1,47 +1,30 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { COLS, ROWS, CELL, GW, GH, VOWELS, STICKY_SET, LW, SP, DIR, DIRS_ARR,
+  LEVELS, WORD_TIMER, LEVEL_DURATION, AI_START_LEVEL, FALLING_START_LEVEL,
+  BOOST_INTERVAL, BOOST_DURATION, BOOST_SPEED_MULT, PITFALL_START_LEVEL,
+  PITFALL_SPAWN_INTERVAL, PITFALL_MORPH_TIME, PITFALL_TYPES, FALLING_SPAWN_INTERVAL,
+  FALLING_SPEED, PORTAL_REPOSITION_INTERVAL, EVENT_TYPES, EVENT_DUR
+} from "./constants.js";
+import SnabbleBot from "./SnabbleBot.js";
 
-const BOUNTY_POOL = "snake,brain,quest,flame,ghost,magic,sword,brave,crown,shark,eagle,frost,bloom,crisp,dream,feast,grape,honey,jewel,kneel,lunar,mirth,noble,oasis,pearl,reign,solar,torch,vivid,whale".split(",");
-const COLS = 24, ROWS = 18, CELL = 28, GW = COLS*CELL, GH = ROWS*CELL;
-const VOWELS = new Set("AEIOU"), STICKY_SET = new Set("QZXJ");
-const LW = "EEEEEEEEEEEETTTTTTTTTAAAAAAAAOOOOOOOIIIIIIINNNNNNNSSSSSSSHHHHHHRRRRRRLLLLDDDDCCCCUUUMMMMWWFFGGYYPBBVVKKJJXXQZZ";
-const SP = {A:1,B:3,C:3,D:2,E:1,F:4,G:2,H:4,I:1,J:8,K:5,L:1,M:3,N:1,O:1,P:3,Q:10,R:1,S:1,T:1,U:1,V:4,W:4,X:8,Y:4,Z:10};
-const DIR = {UP:{x:0,y:-1},DOWN:{x:0,y:1},LEFT:{x:-1,y:0},RIGHT:{x:1,y:0}};
-const DIRS_ARR = [DIR.UP,DIR.DOWN,DIR.LEFT,DIR.RIGHT];
-const rL = ()=>LW[Math.floor(Math.random()*LW.length)];
+let _nonVowelRun = 0;
+const rL = ()=>{
+  if(_nonVowelRun>=4){_nonVowelRun=0;const v="AEIOU";return v[Math.floor(Math.random()*v.length)];}
+  const ch=LW[Math.floor(Math.random()*LW.length)];
+  if(VOWELS.has(ch))_nonVowelRun=0;else _nonVowelRun++;
+  return ch;
+};
 const rP = (avoid)=>{let p,t=0;do{p={x:Math.floor(Math.random()*COLS),y:Math.floor(Math.random()*ROWS)};t++;}while(t<500&&avoid.some(a=>a.x===p.x&&a.y===p.y));return p;};
 const occ = g=>[...g.snake,...g.foods,...g.walls,...g.powerups,...g.speedPads,
   ...g.portals.flatMap(p=>[{x:p.x1,y:p.y1},{x:p.x2,y:p.y2}]),
-  ...(g.aiSnake||[]),...(g.fallingLetters||[])];
-const EVENT_TYPES=["wildcard","poison","bounty","decay","drought"];
-const EVENT_DUR={wildcard:20000,poison:20000,bounty:25000,decay:20000,drought:10000};
-const LEVELS=[
-  {target:300,spd:250,walls:0,pads:0,portals:0},
-  {target:700,spd:235,walls:0,pads:2,portals:1},
-  {target:1200,spd:220,walls:0,pads:2,portals:1},
-  {target:2000,spd:205,walls:2,pads:2,portals:1},
-  {target:3000,spd:190,walls:3,pads:3,portals:2},
-  {target:4500,spd:175,walls:4,pads:3,portals:2},
-  {target:6500,spd:160,walls:5,pads:3,portals:3},
-  {target:9000,spd:145,walls:6,pads:4,portals:3},
-];
-const WORD_TIMER = 10;
-const LEVEL_DURATION = 300;
-const AI_START_LEVEL = 4;
-const FALLING_START_LEVEL = 5;
-const BOOST_INTERVAL = 25000;
-const BOOST_DURATION = 3000;
-const BOOST_SPEED_MULT = 0.4;
-const FALLING_SPAWN_INTERVAL = 3500;
-const FALLING_SPEED = 700;
-const PORTAL_REPOSITION_INTERVAL = 12000;
+  ...(g.aiSnake||[]),...(g.fallingLetters||[]),...(g.pitfalls||[])];
 const DICT_URLS = [
-  "https://raw.githubusercontent.com/dwyl/english-words/master/words.txt",
-  "https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt",
   "https://raw.githubusercontent.com/dolph/dictionary/master/enable1.txt"
 ];
 
-const F = "'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
-const FM = "'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace";
+const F = "'Michroma', system-ui, sans-serif";
+const FM = "'Michroma', system-ui, sans-serif";
+const FN = "'Orbitron', 'Michroma', monospace";
 
 const wrapDist = (a, b, max) => { const d = Math.abs(a - b); return Math.min(d, max - d); };
 
@@ -116,6 +99,8 @@ export default function Game() {
   const raf = useRef(null);
   const wtRef = useRef(null);
   const dictRef = useRef(null);
+  const botRef = useRef(null);
+  const [botActive, setBotActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadStatus, setLoadStatus] = useState("Fetching dictionary...");
   const [ui, setUi] = useState({
@@ -124,12 +109,12 @@ export default function Game() {
     event:null,eventTimer:0,combo:0,stickyTimer:0,stickyLetter:"",
     poisonTimers:[],checking:false,wordTimeLeft:WORD_TIMER,transitioning:false,
     levelTimeLeft:LEVEL_DURATION,uniqueWordCount:0,boosts:0,boostActive:false,
-    scoreReached:false,hasAi:false,hasFalling:false,gameOverReason:""
+    scoreReached:false,hasAi:false,hasFalling:false,hasPitfalls:false,gameOverReason:""
   });
 
   useEffect(()=>{
     const link = document.createElement('link');
-    link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap';
+    link.href = 'https://fonts.googleapis.com/css2?family=Michroma&family=Orbitron:wght@400;500;600;700;800;900&display=swap';
     link.rel = 'stylesheet';
     document.head.appendChild(link);
     return () => document.head.removeChild(link);
@@ -176,8 +161,12 @@ export default function Game() {
   },[]);
 
   const initGame = useCallback((lvl=0, keepScore=false)=>{
-    const snake=[];const sx=Math.floor(COLS/2),sy=Math.floor(ROWS/2);
-    for(let i=0;i<2;i++)snake.push({x:sx-i,y:sy});
+    const prevSnake = keepScore && gs.current ? gs.current.snake.map(s=>({...s})) : null;
+    const prevCollected = keepScore && gs.current ? [...gs.current.collected] : [];
+    const snake = prevSnake || (()=>{
+      const arr=[];const sx=Math.floor(COLS/2),sy=Math.floor(ROWS/2);
+      for(let i=0;i<2;i++)arr.push({x:sx-i,y:sy});return arr;
+    })();
     const L=LEVELS[Math.min(lvl,LEVELS.length-1)];
     const foods=[{...rP(snake),letter:rL(),type:"normal"},{...rP(snake),letter:rL(),type:"normal"}];
     const all=[...snake,...foods];
@@ -192,31 +181,33 @@ export default function Game() {
     const now = performance.now();
     const hasAi = lvl >= AI_START_LEVEL;
     const hasFalling = lvl >= FALLING_START_LEVEL;
+    const hasPitfalls = lvl >= PITFALL_START_LEVEL;
     let aiSnake = [], aiDir = DIR.LEFT, aiSpeed = Math.max(200, 350 - lvl * 20);
     if (hasAi) {
       const ax = Math.floor(COLS * 0.8), ay = Math.floor(ROWS * 0.2);
       aiSnake = [{ x: ax, y: ay }, { x: ax + 1, y: ay }];
     }
-    gs.current={snake,dir:DIR.RIGHT,nextDir:DIR.RIGHT,foods,collected:[],score:ps,
+    gs.current={snake,dir:DIR.RIGHT,nextDir:DIR.RIGHT,foods,collected:prevCollected,score:ps,
       gameOver:false,wordMode:false,baseSpeed:L.spd,speed:L.spd,lastMove:0,flash:null,
       wordsFormed:[...pw],uniqueWords:puw,gameStart:now,level:lvl,levelStartTime:now,
       currentEvent:null,lastEventTime:now,eventCooldown:40000+Math.random()*20000,
       stickyUntil:0,stickyLetter:"",walls,speedPads,portals,powerups:[],powerupTimer:now+20000,
-      comboCount:0,lastWordTime:0,poisonLetters:[],wildcardActive:false,bountyWord:null,
+      comboCount:0,lastWordTime:0,poisonLetters:[],wildcardActive:false,
       decayActive:false,decayTimer:0,wallMoveInterval:Math.max(400,800-lvl*60),wallLastMove:0,
       lifelineTimer:now+lifelineCooldown,lifelineOnGrid:null,
       aiSnake,aiDir,aiSpeed,aiLastMove:now,
       fallingLetters:[],lastFallingSpawn:now,
+      pitfalls:[],lastPitfallSpawn:now,
       boosts:pboosts,boostActiveUntil:0,lastBoostGrant:now,
       portalMoveTimer:now,
       levelAdvancePending:false};
     setUi({started:true,gameOver:false,wordMode:false,wordInput:"",feedback:null,
-      score:ps,len:2,collected:[],level:lvl+1,targetScore:L.target,
+      score:ps,len:snake.length,collected:prevCollected,level:lvl+1,targetScore:L.target,
       event:null,eventTimer:0,combo:0,stickyTimer:0,stickyLetter:"",
       poisonTimers:[],checking:false,wordTimeLeft:WORD_TIMER,
       wordsFormed:[...pw],transitioning:false,
       levelTimeLeft:LEVEL_DURATION,uniqueWordCount:puw.size,boosts:pboosts,boostActive:false,
-      scoreReached:false,hasAi,hasFalling,gameOverReason:""});
+      scoreReached:false,hasAi,hasFalling,hasPitfalls,gameOverReason:""});
   },[]);
 
   const hasLetters=(word,coll)=>{
@@ -245,7 +236,7 @@ export default function Game() {
     if (!g || g.levelAdvancePending) return;
     const lvlIdx = g.level;
     const nextTarget = LEVELS[Math.min(lvlIdx, LEVELS.length - 1)].target;
-    if (g.score >= nextTarget && g.collected.length === 0 && lvlIdx < LEVELS.length) {
+    if (g.score >= nextTarget && lvlIdx < LEVELS.length) {
       g.levelAdvancePending = true;
       setTimeout(() => {
         setUi(p => ({ ...p, transitioning: true, feedback: { type: "success", msg: `Level Up! Entering Level ${lvlIdx + 2}` } }));
@@ -276,11 +267,10 @@ export default function Game() {
     const now=performance.now();
     if(g.lastWordTime>0&&now-g.lastWordTime<15000)g.comboCount++;else g.comboCount=1;
     g.lastWordTime=now;const comboMult=Math.min(g.comboCount,5);
-    const bountyHit=g.bountyWord&&w===g.bountyWord;
     let newLen,penalty=false;
     if(shed>=halfLen){
-      newLen=Math.max(2,snakeLen-(bountyHit?shed*2:shed));
-      g.score+=(scrPts*10+(shed>=5?200:0)+(bountyHit?500:0))*comboMult;
+      newLen=Math.max(2,snakeLen-shed);
+      g.score+=(scrPts*10+(shed>=5?200:0)+(rem.length===0?100:0))*comboMult;
       g.flash={type:"good",time:30};
     }else{
       newLen=snakeLen+unusedCount;
@@ -288,38 +278,64 @@ export default function Game() {
     }
     if(newLen<g.snake.length)g.snake=g.snake.slice(0,newLen);
     else{const tail=g.snake[g.snake.length-1];while(g.snake.length<newLen)g.snake.push({...tail});}
-    if(bountyHit)g.bountyWord=null;
-    const pts=penalty?scrPts*2*comboMult:(scrPts*10+(shed>=5?200:0)+(bountyHit?500:0))*comboMult;
-    g.wordsFormed.push({word:w.toUpperCase(),shed,penalty,score:pts,combo:comboMult,bounty:!!bountyHit});
+    const pts=penalty?scrPts*2*comboMult:(scrPts*10+(shed>=5?200:0)+(rem.length===0?100:0))*comboMult;
+    g.wordsFormed.push({word:w.toUpperCase(),shed,penalty,score:pts,combo:comboMult});
     g.wordMode=false;
 
     const lvlIdx=g.level;const nextTarget=LEVELS[Math.min(lvlIdx,LEVELS.length-1)].target;
     const scoreReached = g.score >= nextTarget && lvlIdx < LEVELS.length;
-    const lettersEmpty = g.collected.length === 0;
 
     let feedbackMsg;
-    if (scoreReached && !lettersEmpty) {
-      feedbackMsg = `Score reached! Shed all ${g.collected.length} letters to advance`;
-    } else if (bountyHit) {
-      feedbackMsg = `Bounty! "${w.toUpperCase()}" +${pts}  ${snakeLen}->${newLen}`;
-    } else if (penalty) {
+    if (penalty) {
       feedbackMsg = `"${w.toUpperCase()}" shed ${shed}, needed ${halfLen} -- +${unusedCount} unused  ${snakeLen}->${newLen}`;
     } else {
-      feedbackMsg = `"${w.toUpperCase()}" +${pts}${comboMult>1?` x${comboMult}`:""} shed ${shed}  ${snakeLen}->${newLen}`;
+      feedbackMsg = `"${w.toUpperCase()}" +${pts}${comboMult>1?` x${comboMult}`:""}${rem.length===0?" PERFECT SHED +100":""} shed ${shed}  ${snakeLen}->${newLen}`;
     }
-    const feedbackType = scoreReached && !lettersEmpty ? "error" : bountyHit ? "bounty" : penalty ? "penalty" : "success";
+    const feedbackType = penalty ? "penalty" : "success";
 
     setUi(p=>({...p,wordMode:false,wordInput:"",collected:[...g.collected],score:g.score,len:g.snake.length,
       wordsFormed:[...g.wordsFormed],combo:g.comboCount,wordTimeLeft:WORD_TIMER,
       uniqueWordCount:g.uniqueWords.size,scoreReached,
       feedback:{type:feedbackType,msg:feedbackMsg}}));
 
-    if (scoreReached && lettersEmpty) {
+    if (scoreReached) {
       tryLevelAdvance(g);
     } else {
       setTimeout(()=>setUi(p=>({...p,feedback:null})),3000);
     }
   },[initGame,isValidWord,tryLevelAdvance]);
+
+  const toggleBot = useCallback(() => {
+    if (botActive) {
+      if (botRef.current) botRef.current.stop();
+      setBotActive(false);
+    } else {
+      if (!botRef.current) {
+        botRef.current = new SnabbleBot(gs, dictRef, submitWord, exitWordMode, setUi);
+      }
+      botRef.current.start();
+      setBotActive(true);
+    }
+  }, [botActive, submitWord, exitWordMode]);
+
+  // Stop bot on game over
+  useEffect(() => {
+    if (ui.gameOver && botRef.current) {
+      botRef.current.stop();
+    }
+  }, [ui.gameOver]);
+
+  // Start/restart bot when game is active and botActive is true
+  useEffect(() => {
+    if (botActive && ui.started && !ui.gameOver && !ui.transitioning) {
+      if (!botRef.current) {
+        botRef.current = new SnabbleBot(gs, dictRef, submitWord, exitWordMode, setUi);
+      }
+      if (!botRef.current.active) {
+        botRef.current.start();
+      }
+    }
+  }, [botActive, ui.started, ui.gameOver, ui.transitioning, submitWord, exitWordMode]);
 
   useEffect(()=>{
     const h=e=>{const g=gs.current;if(!g||g.gameOver){if(e.key==="Enter"&&g?.gameOver)initGame(0);return;}
@@ -386,9 +402,7 @@ export default function Game() {
         const et=EVENT_TYPES[Math.floor(Math.random()*EVENT_TYPES.length)];
         g.currentEvent={type:et,start:now,end:now+EVENT_DUR[et]};g.lastEventTime=now;g.eventCooldown=45000+Math.random()*25000;
         if(et==="wildcard"){g.foods.push({...rP(occ(g)),letter:"★",type:"wildcard"});}
-        else if(et==="bounty")g.bountyWord=BOUNTY_POOL[Math.floor(Math.random()*BOUNTY_POOL.length)];
         else if(et==="decay"){g.decayActive=true;g.decayTimer=now+8000;}
-        else if(et==="drought")g.foods.forEach((f,i)=>{if(VOWELS.has(f.letter)&&f.type==="normal"){let l;do{l=rL();}while(VOWELS.has(l));g.foods[i].letter=l;}});
         else if(et==="poison")g.foods.push({...rP(occ(g)),letter:rL(),type:"poison"});
         setUi(p=>({...p,event:et,eventTimer:Math.ceil(EVENT_DUR[et]/1000)}));
       }
@@ -396,7 +410,6 @@ export default function Game() {
         if(now>=g.currentEvent.end){
           if(g.currentEvent.type==="wildcard")g.foods=g.foods.filter(f=>f.type!=="wildcard");
           if(g.currentEvent.type==="poison")g.foods=g.foods.filter(f=>f.type!=="poison");
-          if(g.currentEvent.type==="bounty")g.bountyWord=null;
           if(g.currentEvent.type==="decay")g.decayActive=false;
           g.currentEvent=null;setUi(p=>({...p,event:null,eventTimer:0}));
         }else{
@@ -404,7 +417,6 @@ export default function Game() {
           if(g.currentEvent.type==="decay"&&g.decayActive&&now>=g.decayTimer&&g.collected.length>0){
             g.collected.shift();g.decayTimer=now+8000;
             setUi(p=>({...p,collected:[...g.collected]}));
-            if (g.collected.length === 0) tryLevelAdvance(g);
           }
         }
       }
@@ -448,6 +460,26 @@ export default function Game() {
         g.fallingLetters = g.fallingLetters.filter(fl => !(fl.landed && now - fl.landTime > 4000));
       }
 
+      // === PITFALLS ===
+      if (g.level >= PITFALL_START_LEVEL) {
+        if (now - g.lastPitfallSpawn >= PITFALL_SPAWN_INTERVAL) {
+          g.lastPitfallSpawn = now;
+          const ptype = PITFALL_TYPES[Math.floor(Math.random() * PITFALL_TYPES.length)];
+          const pos = rP(occ(g));
+          g.pitfalls.push({ x: pos.x, y: pos.y, type: ptype, spawn: now, morphed: false,
+            letter: ptype === "letter" ? rL() : null });
+        }
+        g.pitfalls.forEach(pf => {
+          if (!pf.morphed && now - pf.spawn >= PITFALL_MORPH_TIME) {
+            pf.morphed = true;
+            const others = PITFALL_TYPES.filter(t => t !== pf.type);
+            pf.type = others[Math.floor(Math.random() * others.length)];
+            if (pf.type === "letter") pf.letter = rL(); else pf.letter = null;
+          }
+        });
+        g.pitfalls = g.pitfalls.filter(pf => now - pf.spawn < 8000);
+      }
+
       // === PLAYER MOVEMENT ===
       if(ts-g.lastMove>=g.speed){
         g.lastMove=ts;g.dir=g.nextDir;
@@ -465,7 +497,7 @@ export default function Game() {
             if(f.type==="wildcard")g.collected.push("★");
             else{g.collected.push(f.letter);if(STICKY_SET.has(f.letter)){g.stickyUntil=now+4000;g.stickyLetter=f.letter;if(g.boostActiveUntil<=0)g.speed=g.baseSpeed*1.8;}if(f.type==="poison")g.poisonLetters.push({letter:f.letter,deadline:now+15000});}
             g.score+=(SP[f.letter]||1);
-            if(f.type==="normal"){let nl;const dr=g.currentEvent?.type==="drought";if(dr){do{nl=rL();}while(VOWELS.has(nl));}else nl=rL();g.foods[i]={...rP(occ(g)),letter:nl,type:"normal"};}else g.foods.splice(i,1);
+            if(f.type==="normal"){g.foods[i]={...rP(occ(g)),letter:rL(),type:"normal"};}else g.foods.splice(i,1);
             ate=true;setUi(p=>({...p,collected:[...g.collected],score:g.score,len:g.snake.length,
               scoreReached:g.score>=LEVELS[Math.min(g.level,LEVELS.length-1)].target&&g.level<LEVELS.length}));break;}}
         // Collect falling letters
@@ -487,64 +519,131 @@ export default function Game() {
             else if(pu.type==="freeze"){g.speed=g.baseSpeed*2;setTimeout(()=>{if(g.stickyUntil===0&&g.boostActiveUntil<=performance.now())g.speed=g.baseSpeed;},5000);setUi(p=>({...p,feedback:{type:"success",msg:"Freeze! 5s slow-mo"}}));setTimeout(()=>setUi(p=>({...p,feedback:null})),2000);}
             g.powerups.splice(i,1);break;}}
         g.speedPads.forEach(sp=>{if(sp.x===nx&&sp.y===ny){g.speed=Math.max(60,g.baseSpeed*0.5);sp.active=now+3000;setTimeout(()=>{if(g.stickyUntil===0&&g.boostActiveUntil<=performance.now())g.speed=g.baseSpeed;},3000);}});
+        // === PITFALL COLLISION ===
+        if (g.pitfalls) {
+          for (let i = g.pitfalls.length - 1; i >= 0; i--) {
+            const pf = g.pitfalls[i];
+            if (pf.x === nx && pf.y === ny) {
+              if (pf.type === "speed") {
+                g.speed = g.baseSpeed * 2;
+                g.flash = { type: "bad", time: 30 };
+                setTimeout(() => { if (g.stickyUntil === 0 && g.boostActiveUntil <= performance.now()) g.speed = g.baseSpeed; }, 4000);
+                setUi(p => ({ ...p, feedback: { type: "penalty", msg: "Speed trap! Slowed for 4s" } }));
+                setTimeout(() => setUi(p => ({ ...p, feedback: null })), 2500);
+              } else if (pf.type === "bomb") {
+                const add = 4 + Math.floor(g.level * 0.5);
+                const tail = g.snake[g.snake.length - 1];
+                for (let j = 0; j < add; j++) g.snake.push({ ...tail });
+                g.flash = { type: "bad", time: 40 };
+                setUi(p => ({ ...p, len: g.snake.length, feedback: { type: "penalty", msg: `Bomb! +${add} segments` } }));
+                setTimeout(() => setUi(p => ({ ...p, feedback: null })), 2500);
+              } else if (pf.type === "letter" && pf.letter) {
+                g.collected.push(pf.letter);
+                g.score += (SP[pf.letter] || 1);
+                g.flash = { type: "good", time: 20 };
+                setUi(p => ({ ...p, collected: [...g.collected], score: g.score, feedback: { type: "success", msg: `Pitfall letter: ${pf.letter}!` } }));
+                setTimeout(() => setUi(p => ({ ...p, feedback: null })), 2000);
+              }
+              g.pitfalls.splice(i, 1);
+              break;
+            }
+          }
+        }
         if(!ate)g.snake.pop();setUi(p=>({...p,len:g.snake.length}));
       }
       if(g.flash&&g.flash.time>0)g.flash.time--;draw(ts);raf.current=requestAnimationFrame(tick);
     };
 
+    // === CREAM/GREEN THEME COLORS ===
+    const BG = "#f5f0e8";
+    const GRID_DOT = "#e0d8cc";
+    const TILE_GREEN = "#2d8a4e";
+    const TILE_VOWEL = "#c4842d";
+    const TILE_STICKY = "#9b2d6e";
+    const TILE_WILD = "#b8860b";
+    const TILE_POISON = "#6b2fa0";
+    const TILE_LETTER = BG;
+    const SNAKE_HEAD = "#1a6b35";
+    const SNAKE_BODY_H = 140;
+
+    const drawTile = (ctx, x, y, letter, bg, fg, val) => {
+      const tx = x * CELL, ty = y * CELL, cx = tx + CELL / 2;
+      ctx.fillStyle = bg;
+      ctx.beginPath(); ctx.roundRect(tx + 2, ty + 2, CELL - 4, CELL - 4, 5); ctx.fill();
+      ctx.fillStyle = fg;
+      ctx.font = `bold 22px ${FM}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(letter, cx, ty + CELL / 2 - 1);
+      if (val !== undefined) {
+        ctx.fillStyle = fg; ctx.globalAlpha = 0.7;
+        ctx.font = `bold 11px ${FN}`; ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+        ctx.fillText(val, tx + CELL - 5, ty + CELL - 3);
+        ctx.globalAlpha = 1;
+      }
+    };
+
     const draw=ts=>{
       const g=gs.current,c=cvs.current;if(!c||!g)return;const ctx=c.getContext("2d"),now=performance.now();
-      ctx.fillStyle="#08080f";ctx.fillRect(0,0,GW,GH);
-      if(g.currentEvent){const t={drought:"rgba(180,60,0,0.06)",poison:"rgba(100,0,150,0.06)",wildcard:"rgba(255,215,0,0.05)",bounty:"rgba(0,200,100,0.06)",decay:"rgba(100,100,100,0.06)"};ctx.fillStyle=t[g.currentEvent.type]||"rgba(0,0,0,0)";ctx.fillRect(0,0,GW,GH);}
-      ctx.fillStyle="#181828";for(let x=0;x<COLS;x++)for(let y=0;y<ROWS;y++)ctx.fillRect(x*CELL+CELL/2-1,y*CELL+CELL/2-1,2,2);
-      if(g.flash&&g.flash.time>0){const a=g.flash.time/40*0.15;ctx.fillStyle=g.flash.type==="bad"?`rgba(255,40,40,${a})`:`rgba(40,255,100,${a})`;ctx.fillRect(0,0,GW,GH);}
-      g.speedPads.forEach(sp=>{ctx.fillStyle=now<sp.active?"rgba(255,255,0,0.3)":"rgba(255,255,0,0.1)";ctx.fillRect(sp.x*CELL,sp.y*CELL,CELL,CELL);ctx.font="16px serif";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("⚡",sp.x*CELL+CELL/2,sp.y*CELL+CELL/2);});
-      g.portals.forEach((pt,pi)=>{const pulse=Math.sin(ts/300+pi)*0.3+0.7;[{x:pt.x1,y:pt.y1},{x:pt.x2,y:pt.y2}].forEach(p=>{const gr=ctx.createRadialGradient(p.x*CELL+CELL/2,p.y*CELL+CELL/2,2,p.x*CELL+CELL/2,p.y*CELL+CELL/2,CELL/2);gr.addColorStop(0,`rgba(150,50,255,${pulse})`);gr.addColorStop(1,"rgba(150,50,255,0)");ctx.fillStyle=gr;ctx.beginPath();ctx.arc(p.x*CELL+CELL/2,p.y*CELL+CELL/2,CELL/2,0,Math.PI*2);ctx.fill();ctx.font="14px serif";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("🌀",p.x*CELL+CELL/2,p.y*CELL+CELL/2);});});
-      g.walls.forEach(w=>{ctx.fillStyle="#ff3333";ctx.shadowColor="#ff3333";ctx.shadowBlur=6;ctx.beginPath();ctx.roundRect(w.x*CELL+2,w.y*CELL+2,CELL-4,CELL-4,4);ctx.fill();ctx.shadowBlur=0;});
-      g.powerups.forEach(pu=>{const icons={shrink:"💊",freeze:"❄️"};const pulse=Math.sin(ts/250)*0.3+0.7;ctx.globalAlpha=pulse;ctx.font="18px serif";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(icons[pu.type],pu.x*CELL+CELL/2,pu.y*CELL+CELL/2);ctx.globalAlpha=1;});
-      if(g.lifelineOnGrid){const lf=g.lifelineOnGrid,pulse=Math.sin(ts/200)*0.4+0.6;const gr=ctx.createRadialGradient(lf.x*CELL+CELL/2,lf.y*CELL+CELL/2,2,lf.x*CELL+CELL/2,lf.y*CELL+CELL/2,CELL);gr.addColorStop(0,`rgba(0,255,100,${pulse*0.5})`);gr.addColorStop(1,"rgba(0,255,100,0)");ctx.fillStyle=gr;ctx.beginPath();ctx.arc(lf.x*CELL+CELL/2,lf.y*CELL+CELL/2,CELL,0,Math.PI*2);ctx.fill();ctx.font="20px serif";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("💚",lf.x*CELL+CELL/2,lf.y*CELL+CELL/2);}
+      // cream background
+      ctx.fillStyle=BG;ctx.fillRect(0,0,GW,GH);
+      // subtle grid lines
+      ctx.strokeStyle="#ddd5c8";ctx.lineWidth=0.5;
+      for(let x=0;x<=COLS;x++){ctx.beginPath();ctx.moveTo(x*CELL,0);ctx.lineTo(x*CELL,GH);ctx.stroke();}
+      for(let y=0;y<=ROWS;y++){ctx.beginPath();ctx.moveTo(0,y*CELL);ctx.lineTo(GW,y*CELL);ctx.stroke();}
+      // event tint
+      if(g.currentEvent){const t={poison:"rgba(120,0,180,0.05)",wildcard:"rgba(180,160,0,0.05)",decay:"rgba(100,100,100,0.05)"};ctx.fillStyle=t[g.currentEvent.type]||"rgba(0,0,0,0)";ctx.fillRect(0,0,GW,GH);}
+      // flash
+      if(g.flash&&g.flash.time>0){const a=g.flash.time/40*0.12;ctx.fillStyle=g.flash.type==="bad"?`rgba(200,40,40,${a})`:`rgba(40,160,60,${a})`;ctx.fillRect(0,0,GW,GH);}
+
+      // speed pads
+      g.speedPads.forEach(sp=>{ctx.fillStyle=now<sp.active?"rgba(255,200,0,0.3)":"rgba(255,200,0,0.1)";ctx.beginPath();ctx.roundRect(sp.x*CELL+2,sp.y*CELL+2,CELL-4,CELL-4,5);ctx.fill();ctx.font="20px serif";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("\u26A1",sp.x*CELL+CELL/2,sp.y*CELL+CELL/2);});
+      // portals
+      g.portals.forEach((pt,pi)=>{const pulse=Math.sin(ts/300+pi)*0.3+0.7;[{x:pt.x1,y:pt.y1},{x:pt.x2,y:pt.y2}].forEach(p=>{ctx.fillStyle=`rgba(120,60,200,${pulse*0.25})`;ctx.beginPath();ctx.arc(p.x*CELL+CELL/2,p.y*CELL+CELL/2,CELL/2,0,Math.PI*2);ctx.fill();ctx.font="18px serif";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("\uD83C\uDF00",p.x*CELL+CELL/2,p.y*CELL+CELL/2);});});
+      // walls
+      g.walls.forEach(w=>{ctx.fillStyle="#c0392b";ctx.beginPath();ctx.roundRect(w.x*CELL+2,w.y*CELL+2,CELL-4,CELL-4,5);ctx.fill();});
+      // powerups
+      g.powerups.forEach(pu=>{const icons={shrink:"\uD83D\uDC8A",freeze:"\u2744\uFE0F"};const pulse=Math.sin(ts/250)*0.3+0.7;ctx.globalAlpha=pulse;ctx.font="22px serif";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(icons[pu.type],pu.x*CELL+CELL/2,pu.y*CELL+CELL/2);ctx.globalAlpha=1;});
+      // lifeline
+      if(g.lifelineOnGrid){const lf=g.lifelineOnGrid,pulse=Math.sin(ts/200)*0.3+0.7;ctx.globalAlpha=pulse;ctx.font="22px serif";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("\uD83D\uDC9A",lf.x*CELL+CELL/2,lf.y*CELL+CELL/2);ctx.globalAlpha=1;}
 
       // === DRAW FALLING LETTERS ===
       if (g.fallingLetters) {
         g.fallingLetters.forEach(fl => {
-          const cx = fl.x * CELL + CELL / 2, cy = fl.y * CELL + CELL / 2;
           const alpha = fl.landed ? Math.max(0.3, 1 - (now - fl.landTime) / 4000) : 0.9;
-          // Trail
-          if (!fl.landed) {
-            for (let t = 1; t <= 3; t++) {
-              const ty = fl.y - t;
-              if (ty >= 0) {
-                ctx.fillStyle = `rgba(255,120,50,${0.12 / t})`;
-                ctx.fillRect(fl.x * CELL + 4, ty * CELL + 4, CELL - 8, CELL - 8);
-              }
-            }
-          }
+          if (!fl.landed) { for (let t = 1; t <= 2; t++) { const ty = fl.y - t; if (ty >= 0) { ctx.fillStyle = `rgba(200,120,50,${0.08/t})`; ctx.fillRect(fl.x*CELL+3,ty*CELL+3,CELL-6,CELL-6); }}}
           ctx.globalAlpha = alpha;
-          ctx.fillStyle = fl.landed ? "#1a1000" : "#2a1500";
-          ctx.strokeStyle = "#ff8833";
-          ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.roundRect(fl.x * CELL + 3, fl.y * CELL + 3, CELL - 6, CELL - 6, 4); ctx.fill(); ctx.stroke();
-          ctx.fillStyle = "#ff9944";
-          ctx.font = `bold 16px ${FM}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-          ctx.fillText(fl.letter, cx, cy + 1);
-          ctx.fillStyle = "#664422"; ctx.font = `8px ${FM}`;
-          ctx.fillText(SP[fl.letter] || "", fl.x * CELL + CELL - 7, fl.y * CELL + CELL - 5);
+          drawTile(ctx, fl.x, fl.y, fl.letter, "#d35400", TILE_LETTER, SP[fl.letter]);
           ctx.globalAlpha = 1;
         });
       }
 
-      // === DRAW FOODS ===
+      // === DRAW PITFALLS ===
+      if (g.pitfalls) {
+        g.pitfalls.forEach(pf => {
+          const cx = pf.x * CELL + CELL / 2, cy = pf.y * CELL + CELL / 2;
+          const age = now - pf.spawn;
+          const pulse = Math.sin(ts / 200) * 0.2 + 0.8;
+          const fade = age > 6000 ? Math.max(0.3, 1 - (age - 6000) / 2000) : 1;
+          ctx.globalAlpha = fade * pulse;
+          if (pf.type === "speed") {
+            drawTile(ctx, pf.x, pf.y, "\uD83D\uDC0C", "#e67e22", "", undefined);
+          } else if (pf.type === "bomb") {
+            drawTile(ctx, pf.x, pf.y, "\uD83D\uDCA3", "#c0392b", "", undefined);
+          } else if (pf.type === "letter" && pf.letter) {
+            drawTile(ctx, pf.x, pf.y, pf.letter, "#16a085", TILE_LETTER, SP[pf.letter]);
+          }
+          if (!pf.morphed && age > PITFALL_MORPH_TIME * 0.7) {
+            const warn = Math.sin(ts / 100) > 0;
+            if (warn) { ctx.strokeStyle = "#c0392b"; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(pf.x*CELL+1,pf.y*CELL+1,CELL-2,CELL-2,6); ctx.stroke(); }
+          }
+          ctx.globalAlpha = 1;
+        });
+      }
+
+      // === DRAW FOODS (periodic table style) ===
       g.foods.forEach(f=>{
         const isV=VOWELS.has(f.letter),isS=STICKY_SET.has(f.letter),isW=f.type==="wildcard",isP=f.type==="poison";
-        const cx=f.x*CELL+CELL/2,cy=f.y*CELL+CELL/2;
-        const gr=ctx.createRadialGradient(cx,cy,2,cx,cy,CELL*0.8);
-        gr.addColorStop(0,isW?"rgba(255,215,0,0.6)":isP?"rgba(150,0,200,0.5)":isS?"rgba(255,50,200,0.5)":isV?"rgba(255,180,50,0.4)":"rgba(50,200,255,0.4)");gr.addColorStop(1,"rgba(0,0,0,0)");ctx.fillStyle=gr;ctx.fillRect(f.x*CELL-4,f.y*CELL-4,CELL+8,CELL+8);
-        ctx.fillStyle=isW?"#2a2000":isP?"#1a002a":isS?"#1a0020":isV?"#2a1a00":"#001a2a";
-        ctx.strokeStyle=isW?"#ffd700":isP?"#aa00ff":isS?"#ff44cc":isV?"#ffb832":"#32d4ff";ctx.lineWidth=2;
-        ctx.beginPath();ctx.roundRect(f.x*CELL+3,f.y*CELL+3,CELL-6,CELL-6,4);ctx.fill();ctx.stroke();
-        ctx.fillStyle=isW?"#ffd700":isP?"#cc66ff":isS?"#ff66dd":isV?"#ffcc44":"#44ddff";
-        ctx.font=`bold 16px ${FM}`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(f.letter,cx,cy+1);
-        if(!isW){ctx.fillStyle="#555";ctx.font=`8px ${FM}`;ctx.fillText(SP[f.letter]||"",f.x*CELL+CELL-7,f.y*CELL+CELL-5);}
+        const bg = isW ? TILE_WILD : isP ? TILE_POISON : isS ? TILE_STICKY : isV ? TILE_VOWEL : TILE_GREEN;
+        drawTile(ctx, f.x, f.y, f.letter, bg, TILE_LETTER, isW ? undefined : SP[f.letter]);
       });
 
       // === DRAW AI SNAKE ===
@@ -552,21 +651,15 @@ export default function Game() {
         g.aiSnake.forEach((s, i) => {
           const p = 2;
           if (i === 0) {
-            ctx.fillStyle = "#ff6622"; ctx.shadowColor = "#ff6622"; ctx.shadowBlur = 8;
-            ctx.beginPath(); ctx.roundRect(s.x * CELL + p, s.y * CELL + p, CELL - p * 2, CELL - p * 2, 6); ctx.fill();
-            ctx.shadowBlur = 0;
-            ctx.fillStyle = "#000";
-            const ex = s.x * CELL + CELL / 2, ey = s.y * CELL + CELL / 2;
-            ctx.fillRect(ex - 4, ey - 4, 3, 3); ctx.fillRect(ex + 1, ey - 4, 3, 3);
-            // small "AI" label
-            ctx.fillStyle = "rgba(255,102,34,0.7)"; ctx.font = `bold 8px ${FM}`;
-            ctx.textAlign = "center"; ctx.textBaseline = "middle";
-            ctx.fillText("AI", ex, s.y * CELL + CELL - 4);
+            ctx.fillStyle = "#c0392b"; ctx.beginPath(); ctx.roundRect(s.x*CELL+p,s.y*CELL+p,CELL-p*2,CELL-p*2,6); ctx.fill();
+            ctx.fillStyle = BG; const ex = s.x*CELL+CELL/2, ey = s.y*CELL+CELL/2;
+            ctx.fillRect(ex-4,ey-5,4,4); ctx.fillRect(ex+1,ey-5,4,4);
+            ctx.font = `bold 9px ${FM}`; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+            ctx.fillText("AI", ex, s.y*CELL+CELL-2);
           } else {
             const t = 1 - i / (g.aiSnake.length + 5);
-            const rv = Math.floor(180 + 60 * t), gv = Math.floor(40 + 50 * t), bv = Math.floor(10 + 20 * t);
-            ctx.fillStyle = `rgb(${rv},${gv},${bv})`;
-            ctx.beginPath(); ctx.roundRect(s.x * CELL + p + 1, s.y * CELL + p + 1, CELL - p * 2 - 2, CELL - p * 2 - 2, 4); ctx.fill();
+            ctx.fillStyle = `rgb(${Math.floor(160+40*t)},${Math.floor(40+20*t)},${Math.floor(30+15*t)})`;
+            ctx.beginPath(); ctx.roundRect(s.x*CELL+p+1,s.y*CELL+p+1,CELL-p*2-2,CELL-p*2-2,4); ctx.fill();
           }
         });
       }
@@ -576,48 +669,51 @@ export default function Game() {
       const isBoosted = g.boostActiveUntil > 0 && now < g.boostActiveUntil;
       g.snake.forEach((s,i)=>{const p=2;
         if(i===0){
-          ctx.fillStyle=isBoosted?"#44ffff":isSlow?"#cc66ff":"#4eff4e";
-          ctx.shadowColor=isBoosted?"#44ffff":isSlow?"#cc66ff":"#4eff4e";
-          ctx.shadowBlur=isBoosted?14:10;
-          ctx.beginPath();ctx.roundRect(s.x*CELL+p,s.y*CELL+p,CELL-p*2,CELL-p*2,6);ctx.fill();ctx.shadowBlur=0;
-          ctx.fillStyle="#000";const ex=s.x*CELL+CELL/2,ey=s.y*CELL+CELL/2;
+          ctx.fillStyle=isBoosted?"#2980b9":isSlow?"#8e44ad":SNAKE_HEAD;
+          ctx.beginPath();ctx.roundRect(s.x*CELL+p,s.y*CELL+p,CELL-p*2,CELL-p*2,6);ctx.fill();
+          ctx.fillStyle=BG;const ex=s.x*CELL+CELL/2,ey=s.y*CELL+CELL/2;
           if(g.dir===DIR.RIGHT||g.dir===DIR.LEFT){ctx.fillRect(ex-3,ey-6,4,4);ctx.fillRect(ex-3,ey+2,4,4);}
           else{ctx.fillRect(ex-6,ey-3,4,4);ctx.fillRect(ex+2,ey-3,4,4);}
         }else{const t=1-i/(g.snake.length+5);let rv,gv,bv;
-          if(isBoosted){rv=Math.floor(20+40*t);gv=Math.floor(200+50*t);bv=Math.floor(200+50*t);}
-          else if(isSlow){rv=Math.floor(140+60*t);gv=Math.floor(60+40*t);bv=Math.floor(180+60*t);}
-          else{rv=Math.floor(20+40*t);gv=Math.floor(180+60*t);bv=Math.floor(20+40*t);}
+          if(isBoosted){rv=Math.floor(30+20*t);gv=Math.floor(100+50*t);bv=Math.floor(150+40*t);}
+          else if(isSlow){rv=Math.floor(100+40*t);gv=Math.floor(40+30*t);bv=Math.floor(130+40*t);}
+          else{rv=Math.floor(20+30*t);gv=Math.floor(100+SNAKE_BODY_H*t*0.4);bv=Math.floor(30+20*t);}
           ctx.fillStyle=`rgb(${rv},${gv},${bv})`;ctx.beginPath();ctx.roundRect(s.x*CELL+p+1,s.y*CELL+p+1,CELL-p*2-2,CELL-p*2-2,4);ctx.fill();}
       });
 
       // === HUD ON CANVAS ===
       if(g.currentEvent){
-        const labels={drought:"DROUGHT",poison:"POISON",wildcard:"WILDCARD",bounty:"BOUNTY",decay:"DECAY"};
-        const colors={drought:"rgba(180,40,0,0.9)",poison:"rgba(100,0,160,0.9)",wildcard:"rgba(160,130,0,0.9)",bounty:"rgba(0,120,70,0.9)",decay:"rgba(70,70,70,0.9)"};
-        const rem=Math.max(0,Math.ceil((g.currentEvent.end-now)/1000));let label=labels[g.currentEvent.type]+` ${rem}s`;if(g.bountyWord)label+=` "${g.bountyWord.toUpperCase()}"`;
-        ctx.fillStyle=colors[g.currentEvent.type];const tw=Math.max(180,label.length*9+16);ctx.beginPath();ctx.roundRect(GW/2-tw/2,6,tw,28,8);ctx.fill();
-        ctx.fillStyle="#fff";ctx.font=`600 14px ${FM}`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(label,GW/2,20);
+        const labels={poison:"POISON",wildcard:"WILDCARD",decay:"DECAY"};
+        const colors={poison:"rgba(107,47,160,0.9)",wildcard:"rgba(184,134,11,0.9)",decay:"rgba(100,100,100,0.9)"};
+        const rem=Math.max(0,Math.ceil((g.currentEvent.end-now)/1000));let label=labels[g.currentEvent.type]+` ${rem}s`;
+        ctx.fillStyle=colors[g.currentEvent.type];const tw=Math.max(180,label.length*10+16);ctx.beginPath();ctx.roundRect(GW/2-tw/2,6,tw,28,8);ctx.fill();
+        ctx.fillStyle="#fff";ctx.font=`600 13px ${FM}`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(label,GW/2,20);
       }
 
       // Level timer on canvas
       const tleft = Math.max(0, LEVEL_DURATION - (now - g.levelStartTime) / 1000);
       const tmins = Math.floor(tleft / 60), tsecs = Math.floor(tleft % 60);
       const tstr = `${tmins}:${tsecs.toString().padStart(2, "0")}`;
-      ctx.fillStyle = tleft < 30 ? "rgba(255,40,40,0.9)" : tleft < 60 ? "rgba(255,170,0,0.9)" : "rgba(100,100,100,0.7)";
-      ctx.beginPath(); ctx.roundRect(GW - 72, 6, 66, 24, 6); ctx.fill();
-      ctx.fillStyle = "#fff"; ctx.font = `700 14px ${FM}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(tstr, GW - 39, 18);
+      ctx.fillStyle = tleft < 30 ? "rgba(192,57,43,0.9)" : tleft < 60 ? "rgba(211,84,0,0.9)" : "rgba(120,110,100,0.8)";
+      ctx.beginPath(); ctx.roundRect(GW - 96, 6, 90, 34, 6); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = `700 18px ${FN}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(tstr, GW - 51, 23);
+
+      // BOT badge
+      if(botRef.current && botRef.current.active){
+        ctx.fillStyle="rgba(41,128,185,0.9)";
+        ctx.beginPath();ctx.roundRect(6,6,52,26,6);ctx.fill();
+        ctx.fillStyle="#fff";ctx.font=`700 13px ${FN}`;ctx.textAlign="center";ctx.textBaseline="middle";
+        ctx.fillText("BOT",32,19);
+      }
 
       if(g.gameOver){
-        ctx.fillStyle="rgba(0,0,0,0.85)";ctx.fillRect(0,0,GW,GH);
-        ctx.fillStyle="#ff4444";ctx.font=`800 48px ${F}`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("GAME OVER",GW/2,GH/2-54);
-        ctx.fillStyle="#ff8888";ctx.font=`500 18px ${F}`;
-        const reason = g.gameOver === true ? "" : "";
-        ctx.fillText(reason,GW/2,GH/2-16);
-        ctx.fillStyle="#ddd";ctx.font=`600 22px ${F}`;ctx.fillText(`Score: ${g.score}  |  Level ${g.level+1}  |  ${g.uniqueWords.size} unique words`,GW/2,GH/2+14);
-        ctx.fillStyle="#777";ctx.font=`500 16px ${F}`;ctx.fillText("Press Enter to restart",GW/2,GH/2+52);
+        ctx.fillStyle="rgba(40,35,30,0.9)";ctx.fillRect(0,0,GW,GH);
+        ctx.fillStyle="#c0392b";ctx.font=`800 48px ${F}`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("GAME OVER",GW/2,GH/2-54);
+        ctx.fillStyle=BG;ctx.font=`600 20px ${FN}`;ctx.fillText(`Score: ${g.score}  |  Level ${g.level+1}  |  ${g.uniqueWords.size} words`,GW/2,GH/2+6);
+        ctx.fillStyle="#a09080";ctx.font=`500 16px ${F}`;ctx.fillText("Press Enter to restart",GW/2,GH/2+44);
       }
-      if(g.wordMode){ctx.fillStyle="rgba(0,0,0,0.6)";ctx.fillRect(0,0,GW,GH);ctx.fillStyle="#ffcc44";ctx.font=`800 28px ${F}`;ctx.textAlign="center";ctx.fillText("WORD MODE",GW/2,GH/2-12);ctx.fillStyle="#888";ctx.font=`500 16px ${F}`;ctx.fillText("Press Esc to cancel",GW/2,GH/2+26);}
+      if(g.wordMode){ctx.fillStyle="rgba(40,35,30,0.7)";ctx.fillRect(0,0,GW,GH);ctx.fillStyle=BG;ctx.font=`800 28px ${F}`;ctx.textAlign="center";ctx.fillText("WORD MODE",GW/2,GH/2-12);ctx.fillStyle="#a09080";ctx.font=`500 16px ${F}`;ctx.fillText("Press Esc to cancel",GW/2,GH/2+26);}
     };
     raf.current=requestAnimationFrame(tick);return()=>{run=false;cancelAnimationFrame(raf.current);};
   },[ui.started,ui.wordMode,tryLevelAdvance]);
@@ -632,46 +728,50 @@ export default function Game() {
 
   if(loading){
     return(
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"#08080f",color:"#eee",fontFamily:F}}>
-        <h1 style={{fontSize:56,fontWeight:900,marginBottom:20,letterSpacing:"-2px",background:"linear-gradient(135deg,#4eff4e,#44ddff,#ff44cc,#ffd700)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>SNABBLE</h1>
-        <div style={{color:"#ffcc44",fontSize:20,fontWeight:500,marginBottom:12}}>{loadStatus}</div>
-        <div style={{color:"#555",fontSize:15,fontWeight:400}}>Loading word lists...</div>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"#f5f0e8",color:"#3a3530",fontFamily:F}}>
+        <h1 style={{fontSize:56,fontWeight:900,marginBottom:20,letterSpacing:"-2px",color:"#2d8a4e"}}>SNABBLE</h1>
+        <div style={{color:"#c4842d",fontSize:20,fontWeight:500,marginBottom:12}}>{loadStatus}</div>
+        <div style={{color:"#a09080",fontSize:15,fontWeight:400}}>Loading word lists...</div>
       </div>);
   }
 
   if(!ui.started){
     return(
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"#08080f",color:"#eee",fontFamily:F,padding:20}}>
-        <h1 style={{fontSize:60,fontWeight:900,marginBottom:6,letterSpacing:"-3px",background:"linear-gradient(135deg,#4eff4e,#44ddff,#ff44cc,#ffd700)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>SNABBLE</h1>
-        <p style={{color:"#777",fontSize:19,fontWeight:400,marginBottom:24,letterSpacing:"0.5px"}}>Eat letters. Form words. Survive the chaos.</p>
-        <div style={{color:"#4eff4e",fontSize:15,fontWeight:500,marginBottom:20,opacity:0.8}}>{loadStatus}</div>
-        <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:16,padding:"28px 32px",maxWidth:620,marginBottom:32,lineHeight:2,fontSize:15,color:"#bbb",fontWeight:400,backdropFilter:"blur(10px)"}}>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"#f5f0e8",color:"#3a3530",fontFamily:F,padding:20}}>
+        <h1 style={{fontSize:60,fontWeight:900,marginBottom:6,letterSpacing:"-3px",color:"#2d8a4e"}}>SNABBLE</h1>
+        <p style={{color:"#8a7e70",fontSize:19,fontWeight:400,marginBottom:24,letterSpacing:"0.5px"}}>Eat letters. Form words. Survive the chaos.</p>
+        <div style={{color:"#2d8a4e",fontSize:15,fontWeight:500,marginBottom:20,opacity:0.8}}>{loadStatus}</div>
+        <div style={{background:"#eee8dd",border:"1px solid #ddd5c8",borderRadius:16,padding:"28px 32px",maxWidth:620,marginBottom:32,lineHeight:2,fontSize:15,color:"#6a6050",fontWeight:400}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"18px 32px"}}>
             <div>
-              <div style={{color:"#fff",fontWeight:700,marginBottom:8,fontSize:18,letterSpacing:"-0.5px"}}>Controls</div>
-              <div><span style={{color:"#4eff4e",fontFamily:FM,fontWeight:600}}>Arrow Keys</span> <span style={{color:"#999"}}>Move</span></div>
-              <div><span style={{color:"#ffcc44",fontFamily:FM,fontWeight:600}}>W</span> <span style={{color:"#999"}}>Word Mode</span> <span style={{color:"#666",fontSize:13}}>(10s)</span></div>
-              <div><span style={{color:"#44ffff",fontFamily:FM,fontWeight:600}}>B</span> <span style={{color:"#999"}}>Use Boost</span> <span style={{color:"#666",fontSize:13}}>(stored)</span></div>
+              <div style={{color:"#2d8a4e",fontWeight:700,marginBottom:8,fontSize:18,letterSpacing:"-0.5px"}}>Controls</div>
+              <div><span style={{color:"#2d8a4e",fontFamily:FM,fontWeight:600}}>Arrow Keys</span> <span style={{color:"#8a7e70"}}>Move</span></div>
+              <div><span style={{color:"#c4842d",fontFamily:FM,fontWeight:600}}>W</span> <span style={{color:"#8a7e70"}}>Word Mode</span> <span style={{color:"#b0a090",fontSize:13}}>(10s)</span></div>
+              <div><span style={{color:"#2980b9",fontFamily:FM,fontWeight:600}}>B</span> <span style={{color:"#8a7e70"}}>Use Boost</span> <span style={{color:"#b0a090",fontSize:13}}>(stored)</span></div>
             </div>
             <div>
-              <div style={{color:"#fff",fontWeight:700,marginBottom:8,fontSize:18,letterSpacing:"-0.5px"}}>Level Rules</div>
-              <div><span style={{color:"#4eff4e"}}>5:00</span> <span style={{color:"#999"}}>per level</span></div>
-              <div><span style={{color:"#ffcc44"}}>Score</span> <span style={{color:"#999"}}>+ shed ALL letters to advance</span></div>
-              <div><span style={{color:"#ff5555"}}>Fail</span> <span style={{color:"#999"}}>= +unused to length</span></div>
+              <div style={{color:"#2d8a4e",fontWeight:700,marginBottom:8,fontSize:18,letterSpacing:"-0.5px"}}>Level Rules</div>
+              <div><span style={{color:"#2d8a4e"}}>5:00</span> <span style={{color:"#8a7e70"}}>per level</span></div>
+              <div><span style={{color:"#c4842d"}}>Score</span> <span style={{color:"#8a7e70"}}>target to advance level</span></div>
+              <div><span style={{color:"#c0392b"}}>Fail</span> <span style={{color:"#8a7e70"}}>= +unused to length</span></div>
             </div>
           </div>
-          <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:14,marginTop:16,fontSize:14,color:"#888",lineHeight:1.8}}>
-            <span style={{color:"#ffcc44"}}>Vowel</span> <span style={{color:"#44ddff",marginLeft:8}}>Consonant</span> <span style={{color:"#ff66dd",marginLeft:8}}>Sticky</span> <span style={{color:"#ffd700",marginLeft:8}}>Wildcard</span> <span style={{marginLeft:8,color:"#4eff4e"}}>Lifeline</span> <span style={{color:"#44ffff",marginLeft:8}}>Boost</span>
+          <div style={{borderTop:"1px solid #ddd5c8",paddingTop:14,marginTop:16,fontSize:14,color:"#8a7e70",lineHeight:1.8}}>
+            <span style={{color:"#c4842d"}}>Vowel</span> <span style={{color:"#2d8a4e",marginLeft:8}}>Consonant</span> <span style={{color:"#9b2d6e",marginLeft:8}}>Sticky</span> <span style={{color:"#b8860b",marginLeft:8}}>Wildcard</span> <span style={{marginLeft:8,color:"#27ae60"}}>Lifeline</span> <span style={{color:"#2980b9",marginLeft:8}}>Boost</span>
           </div>
-          <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:14,marginTop:14,fontSize:14,color:"#888",lineHeight:1.9}}>
-            <span style={{color:"#aaa",fontWeight:600}}>Events</span> — Drought | Wildcard | Poison | Bounty | Decay<br/>
-            <span style={{color:"#aaa",fontWeight:600}}>Items</span> — Shrink | Freeze | Speed | Portal | Wall<br/>
-            <span style={{color:"#ff6622",fontWeight:600}}>Lv.5+</span> — AI snake hunts your vowels<br/>
-            <span style={{color:"#ff8833",fontWeight:600}}>Lv.6+</span> — Letters fall from above (tetris-style)<br/>
-            <span style={{color:"#aaa",fontWeight:600}}>8 levels</span> | combo chain words within 15s for multipliers
+          <div style={{borderTop:"1px solid #ddd5c8",paddingTop:14,marginTop:14,fontSize:14,color:"#8a7e70",lineHeight:1.9}}>
+            <span style={{color:"#5a5040",fontWeight:600}}>Events</span> — Wildcard | Poison | Decay<br/>
+            <span style={{color:"#5a5040",fontWeight:600}}>Items</span> — Shrink | Freeze | Speed | Portal | Wall<br/>
+            <span style={{color:"#d35400",fontWeight:600}}>Lv.3+</span> — Pitfalls: speed traps, bombs, letters (morph if slow!)<br/>
+            <span style={{color:"#c0392b",fontWeight:600}}>Lv.5+</span> — AI snake hunts your vowels<br/>
+            <span style={{color:"#d35400",fontWeight:600}}>Lv.6+</span> — Letters fall from above (tetris-style)<br/>
+            <span style={{color:"#5a5040",fontWeight:600}}>8 levels</span> | combo chain words within 15s for multipliers
           </div>
         </div>
-        <button onClick={()=>initGame(0)} style={{background:"linear-gradient(135deg,#4eff4e,#22bb44)",color:"#000",border:"none",padding:"18px 56px",borderRadius:14,fontSize:24,fontFamily:F,fontWeight:800,cursor:"pointer",letterSpacing:"-0.5px",boxShadow:"0 0 40px rgba(78,255,78,0.2)",transition:"transform 0.15s, box-shadow 0.15s"}} onMouseOver={e=>{e.target.style.transform="scale(1.04)";e.target.style.boxShadow="0 0 60px rgba(78,255,78,0.35)";}} onMouseOut={e=>{e.target.style.transform="scale(1)";e.target.style.boxShadow="0 0 40px rgba(78,255,78,0.2)";}}>Start Game</button>
+        <div style={{display:"flex",gap:16,alignItems:"center"}}>
+          <button onClick={()=>initGame(0)} style={{background:"#2d8a4e",color:"#f5f0e8",border:"none",padding:"18px 56px",borderRadius:14,fontSize:24,fontFamily:F,fontWeight:800,cursor:"pointer",letterSpacing:"-0.5px",boxShadow:"0 4px 20px rgba(45,138,78,0.3)",transition:"transform 0.15s, box-shadow 0.15s"}} onMouseOver={e=>{e.target.style.transform="scale(1.04)";e.target.style.boxShadow="0 4px 30px rgba(45,138,78,0.45)";}} onMouseOut={e=>{e.target.style.transform="scale(1)";e.target.style.boxShadow="0 4px 20px rgba(45,138,78,0.3)";}}>Start Game</button>
+          <button onClick={()=>setBotActive(b=>!b)} style={{background:botActive?"#2980b9":"#e0d8cc",color:botActive?"#fff":"#5a5040",border:`2px solid ${botActive?"#2980b9":"#ccc5b8"}`,padding:"18px 28px",borderRadius:14,fontSize:18,fontFamily:F,fontWeight:700,cursor:"pointer",transition:"all 0.15s"}}>{botActive?"BOT ON":"BOT OFF"}</button>
+        </div>
       </div>);
   }
 
@@ -680,116 +780,119 @@ export default function Game() {
   const timeStr=`${tmins}:${tsecs.toString().padStart(2,"0")}`;
 
   return(
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",background:"#08080f",minHeight:"100vh",fontFamily:F,color:"#eee",padding:"12px"}}>
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",background:"#f5f0e8",minHeight:"100vh",fontFamily:F,color:"#3a3530",padding:"12px"}}>
       {/* Stats bar */}
       <div style={{display:"flex",gap:20,marginBottom:10,fontSize:17,flexWrap:"wrap",justifyContent:"center",alignItems:"center",fontWeight:500}}>
-        <span style={{color:"#ffd700",fontWeight:800,fontSize:20,fontFamily:FM}}>Lv.{ui.level}</span>
-        <span style={{color:ui.levelTimeLeft<=30?"#ff4444":ui.levelTimeLeft<=60?"#ffaa44":"#aaa",fontWeight:800,fontSize:20,fontFamily:FM}}>{timeStr}</span>
-        <span style={{color:"#aaa"}}>Score <b style={{color:"#ffcc44",fontSize:22,fontWeight:800,fontFamily:FM,marginLeft:4}}>{ui.score.toLocaleString()}</b></span>
-        <span style={{color:"#aaa"}}>Length <b style={{color:ui.len>20?"#ff4444":ui.len>12?"#ffaa44":"#4eff4e",fontSize:22,fontWeight:800,fontFamily:FM,marginLeft:4}}>{ui.len}</b></span>
-        <span style={{color:"#aaa"}}>Words <b style={{color:"#44ddff",fontSize:18,fontWeight:800,fontFamily:FM,marginLeft:4}}>{ui.uniqueWordCount}</b></span>
-        {ui.boosts>0&&<span style={{color:"#44ffff",fontWeight:700,fontSize:15}}>Boost x{ui.boosts} <span style={{color:"#666",fontSize:12}}>[B]</span></span>}
-        {ui.boostActive&&<span style={{color:"#44ffff",fontWeight:700,fontSize:15,animation:"none"}}>BOOST ACTIVE</span>}
-        {ui.combo>1&&<span style={{color:"#ffd700",fontWeight:700}}>x{ui.combo}</span>}
-        {ui.stickyTimer>0&&<span style={{color:"#ff66dd",fontWeight:600,fontSize:15}}>Sticky {ui.stickyLetter} ({ui.stickyTimer}s)</span>}
-        {ui.poisonTimers.map((p,i)=><span key={i} style={{color:"#cc66ff",fontWeight:600,fontSize:15}}>Poison {p.letter} ({p.secs}s)</span>)}
-        {ui.scoreReached&&ui.collected.length>0&&<span style={{color:"#ff8833",fontWeight:700,fontSize:14}}>SHED ALL LETTERS TO ADVANCE</span>}
+        <span style={{color:"#2d8a4e",fontWeight:800,fontSize:20,fontFamily:FN}}>Lv.{ui.level}</span>
+        <span style={{color:ui.levelTimeLeft<=30?"#c0392b":ui.levelTimeLeft<=60?"#d35400":"#8a7e70",fontWeight:800,fontSize:28,fontFamily:FN}}>{timeStr}</span>
+        <span style={{color:"#8a7e70"}}>Score <b style={{color:"#c4842d",fontSize:22,fontWeight:800,fontFamily:FN,marginLeft:4}}>{ui.score.toLocaleString()}</b></span>
+        <span style={{color:"#8a7e70"}}>Length <b style={{color:ui.len>20?"#c0392b":ui.len>12?"#d35400":"#2d8a4e",fontSize:22,fontWeight:800,fontFamily:FN,marginLeft:4}}>{ui.len}</b></span>
+        <span style={{color:"#8a7e70"}}>Words <b style={{color:"#2d8a4e",fontSize:18,fontWeight:800,fontFamily:FN,marginLeft:4}}>{ui.uniqueWordCount}</b></span>
+        {ui.boosts>0&&<span style={{color:"#2980b9",fontWeight:700,fontSize:15}}>Boost x{ui.boosts} <span style={{color:"#b0a090",fontSize:12}}>[B]</span></span>}
+        {ui.boostActive&&<span style={{color:"#2980b9",fontWeight:700,fontSize:15}}>BOOST ACTIVE</span>}
+        {ui.combo>1&&<span style={{color:"#c4842d",fontWeight:700}}>x{ui.combo}</span>}
+        {ui.stickyTimer>0&&<span style={{color:"#9b2d6e",fontWeight:600,fontSize:15}}>Sticky {ui.stickyLetter} ({ui.stickyTimer}s)</span>}
+        {ui.poisonTimers.map((p,i)=><span key={i} style={{color:"#6b2fa0",fontWeight:600,fontSize:15}}>Poison {p.letter} ({p.secs}s)</span>)}
+        <button onClick={toggleBot} style={{background:botActive?"#2980b9":"#e0d8cc",color:botActive?"#fff":"#5a5040",border:`2px solid ${botActive?"#2980b9":"#ccc5b8"}`,padding:"4px 14px",borderRadius:8,fontSize:13,fontFamily:F,fontWeight:700,cursor:"pointer",transition:"all 0.15s"}}>{botActive?"BOT ON":"BOT OFF"}</button>
       </div>
       {/* Progress bar */}
-      <div style={{width:GW+200,height:6,background:"rgba(255,255,255,0.04)",borderRadius:3,marginBottom:10,overflow:"hidden"}}>
-        <div style={{height:"100%",width:`${progressPct}%`,background:ui.scoreReached?"linear-gradient(90deg,#ffd700,#ff8833)":"linear-gradient(90deg,#4eff4e,#ffd700)",borderRadius:3,transition:"width 0.3s"}}/>
+      <div style={{width:GW+200,height:6,background:"#e0d8cc",borderRadius:3,marginBottom:10,overflow:"hidden"}}>
+        <div style={{height:"100%",width:`${progressPct}%`,background:ui.scoreReached?"linear-gradient(90deg,#c4842d,#d35400)":"linear-gradient(90deg,#2d8a4e,#c4842d)",borderRadius:3,transition:"width 0.3s"}}/>
       </div>
 
       {/* Main layout */}
       <div style={{display:"flex",gap:14,alignItems:"flex-start"}}>
         <div style={{position:"relative"}}>
-          <canvas ref={cvs} width={GW} height={GH} style={{border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,display:"block"}}/>
+          <canvas ref={cvs} width={GW} height={GH} style={{border:"2px solid #ddd5c8",borderRadius:10,display:"block"}}/>
           {ui.feedback&&(
             <div style={{position:"absolute",bottom:14,left:"50%",transform:"translateX(-50%)",
               padding:"10px 24px",borderRadius:10,fontSize:16,fontWeight:600,textAlign:"center",whiteSpace:"nowrap",zIndex:10,
               fontFamily:F,letterSpacing:"-0.3px",
-              background:ui.feedback.type==="success"||ui.feedback.type==="bounty"?"rgba(10,42,10,0.95)":ui.feedback.type==="penalty"?"rgba(42,10,10,0.95)":"rgba(42,26,0,0.95)",
-              border:`2px solid ${ui.feedback.type==="success"?"#4eff4e":ui.feedback.type==="bounty"?"#ffd700":ui.feedback.type==="penalty"?"#ff4444":"#ffaa00"}`,
-              color:ui.feedback.type==="success"?"#4eff4e":ui.feedback.type==="bounty"?"#ffd700":ui.feedback.type==="penalty"?"#ff4444":"#ffaa00",
-              boxShadow:`0 4px 24px ${ui.feedback.type==="success"||ui.feedback.type==="bounty"?"rgba(78,255,78,0.15)":ui.feedback.type==="penalty"?"rgba(255,68,68,0.15)":"rgba(255,170,0,0.15)"}`
+              background:ui.feedback.type==="success"?"#eaf5ee":"rgba(253,237,237,0.97)",
+              border:`2px solid ${ui.feedback.type==="success"?"#2d8a4e":"#c0392b"}`,
+              color:ui.feedback.type==="success"?"#1a6b35":"#c0392b",
+              boxShadow:"0 4px 20px rgba(0,0,0,0.1)"
             }}>{ui.feedback.msg}</div>
           )}
         </div>
 
         {/* Side panel */}
-        <div style={{width:190,background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:12,padding:"14px 12px",display:"flex",flexDirection:"column",gap:0,backdropFilter:"blur(10px)"}}>
-          <div style={{color:"#777",fontSize:13,marginBottom:10,textAlign:"center",fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase"}}>Collected <span style={{color:"#aaa",fontFamily:FM}}>({ui.collected.length})</span></div>
+        <div style={{width:190,background:"#eee8dd",border:"1px solid #ddd5c8",borderRadius:12,padding:"14px 12px",display:"flex",flexDirection:"column",gap:0}}>
+          <div style={{color:"#8a7e70",fontSize:13,marginBottom:10,textAlign:"center",fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase"}}>Collected <span style={{color:"#5a5040",fontFamily:FN}}>({ui.collected.length})</span></div>
           <div style={{display:"flex",gap:5,flexWrap:"wrap",justifyContent:"center",minHeight:44}}>
             {ui.collected.map((l,i)=>{
               const isV=VOWELS.has(l),isS=STICKY_SET.has(l),isW=l==="★",isP=ui.poisonTimers.some(p=>p.letter===l);
+              const bg=isW?"#b8860b":isP?"#6b2fa0":isS?"#9b2d6e":isV?"#c4842d":"#2d8a4e";
               return(<span key={i} style={{display:"inline-flex",alignItems:"center",justifyContent:"center",position:"relative",
-                width:36,height:40,borderRadius:6,fontSize:21,fontWeight:700,fontFamily:FM,
-                background:isW?"#2a2000":isP?"#1a002a":isS?"#1a0020":isV?"#2a1a00":"#001a2a",
-                border:`2px solid ${isW?"#ffd700":isP?"#aa00ff":isS?"#ff44cc":isV?"#ffb832":"#32d4ff"}`,
-                color:isW?"#ffd700":isP?"#cc66ff":isS?"#ff66dd":isV?"#ffcc44":"#44ddff",
-                boxShadow:`0 0 8px ${isW?"rgba(255,215,0,0.2)":isP?"rgba(170,0,255,0.15)":isS?"rgba(255,68,204,0.15)":isV?"rgba(255,184,50,0.1)":"rgba(50,212,255,0.1)"}`
-              }}>{l}{!isW&&<span style={{position:"absolute",bottom:1,right:3,fontSize:9,color:"#555",fontWeight:500}}>{SP[l]}</span>}</span>);
+                width:38,height:42,borderRadius:5,fontSize:20,fontWeight:700,fontFamily:FM,
+                background:bg,color:"#f5f0e8"
+              }}>{l}{!isW&&<span style={{position:"absolute",bottom:2,right:4,fontSize:10,color:"rgba(245,240,232,0.7)",fontWeight:600}}>{SP[l]}</span>}</span>);
             })}
-            {ui.collected.length===0&&<span style={{color:"#444",fontSize:14,padding:"12px 0",textAlign:"center",fontWeight:400,lineHeight:1.5}}>Eat letters<br/>to collect</span>}
+            {ui.collected.length===0&&<span style={{color:"#b0a090",fontSize:14,padding:"12px 0",textAlign:"center",fontWeight:400,lineHeight:1.5}}>Eat letters<br/>to collect</span>}
           </div>
 
-          <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",marginTop:12,paddingTop:10,textAlign:"center"}}>
-            <div style={{color:"#777",fontSize:13,fontWeight:500}}>{"Need >= "}<b style={{color:ui.collected.length>=Math.ceil(ui.len/2)?"#4eff4e":"#ff5555",fontFamily:FM,fontWeight:700}}>{Math.ceil(ui.len/2)}</b>{" to shed safely"}</div>
-            <div style={{color:"#555",fontSize:13,marginTop:2,fontWeight:400}}>Fail = <span style={{color:"#ff6666",fontWeight:600}}>+unused to length</span></div>
-            {ui.scoreReached&&<div style={{color:"#ff8833",fontSize:12,marginTop:4,fontWeight:700}}>Shed all to advance!</div>}
-            <div style={{color:"#555",fontSize:13,marginTop:6,fontWeight:400}}>Press <span style={{color:"#ffcc44",fontWeight:700,fontFamily:FM}}>W</span> for Word Mode</div>
-            {ui.boosts>0&&<div style={{color:"#44ffff",fontSize:13,marginTop:4,fontWeight:600}}>Press <span style={{fontFamily:FM,fontWeight:700}}>B</span> for Boost ({ui.boosts})</div>}
+          <div style={{borderTop:"1px solid #ddd5c8",marginTop:12,paddingTop:10,textAlign:"center"}}>
+            <div style={{color:"#8a7e70",fontSize:13,fontWeight:500}}>{"Need >= "}<b style={{color:ui.collected.length>=Math.ceil(ui.len/2)?"#2d8a4e":"#c0392b",fontFamily:FN,fontWeight:700}}>{Math.ceil(ui.len/2)}</b>{" to shed safely"}</div>
+            <div style={{color:"#b0a090",fontSize:13,marginTop:2,fontWeight:400}}>Fail = <span style={{color:"#c0392b",fontWeight:600}}>+unused to length</span></div>
+            <div style={{color:"#b0a090",fontSize:13,marginTop:6,fontWeight:400}}>Press <span style={{color:"#c4842d",fontWeight:700,fontFamily:FM}}>W</span> for Word Mode</div>
+            {ui.boosts>0&&<div style={{color:"#2980b9",fontSize:13,marginTop:4,fontWeight:600}}>Press <span style={{fontFamily:FM,fontWeight:700}}>B</span> for Boost ({ui.boosts})</div>}
           </div>
 
           {ui.hasAi&&(
-            <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",marginTop:12,paddingTop:8,textAlign:"center"}}>
-              <div style={{color:"#ff6622",fontSize:12,fontWeight:700,letterSpacing:"0.5px"}}>AI SNAKE ACTIVE</div>
-              <div style={{color:"#884422",fontSize:11,fontWeight:400,marginTop:2}}>Hunting your vowels</div>
+            <div style={{borderTop:"1px solid #ddd5c8",marginTop:12,paddingTop:8,textAlign:"center"}}>
+              <div style={{color:"#c0392b",fontSize:12,fontWeight:700,letterSpacing:"0.5px"}}>AI SNAKE ACTIVE</div>
+              <div style={{color:"#b0a090",fontSize:11,fontWeight:400,marginTop:2}}>Hunting your vowels</div>
+            </div>
+          )}
+          {ui.hasPitfalls&&(
+            <div style={{borderTop:"1px solid #ddd5c8",marginTop:8,paddingTop:8,textAlign:"center"}}>
+              <div style={{color:"#d35400",fontSize:12,fontWeight:700,letterSpacing:"0.5px"}}>PITFALLS ACTIVE</div>
+              <div style={{color:"#b0a090",fontSize:11,fontWeight:400,marginTop:2}}>Bomb | Speed | Letter</div>
             </div>
           )}
           {ui.hasFalling&&(
-            <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",marginTop:8,paddingTop:8,textAlign:"center"}}>
-              <div style={{color:"#ff8833",fontSize:12,fontWeight:700,letterSpacing:"0.5px"}}>LETTERS FALLING</div>
-              <div style={{color:"#885522",fontSize:11,fontWeight:400,marginTop:2}}>Catch them as they drop</div>
+            <div style={{borderTop:"1px solid #ddd5c8",marginTop:8,paddingTop:8,textAlign:"center"}}>
+              <div style={{color:"#d35400",fontSize:12,fontWeight:700,letterSpacing:"0.5px"}}>LETTERS FALLING</div>
+              <div style={{color:"#b0a090",fontSize:11,fontWeight:400,marginTop:2}}>Catch them as they drop</div>
             </div>
           )}
 
           {stats&&(
-            <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",marginTop:12,paddingTop:10}}>
-              <div style={{color:"#777",fontSize:11,textAlign:"center",marginBottom:8,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase"}}>Stats</div>
+            <div style={{borderTop:"1px solid #ddd5c8",marginTop:12,paddingTop:10}}>
+              <div style={{color:"#8a7e70",fontSize:11,textAlign:"center",marginBottom:8,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase"}}>Stats</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-                <div style={{background:"rgba(78,255,78,0.04)",border:"1px solid rgba(78,255,78,0.1)",borderRadius:8,padding:"6px 4px",textAlign:"center"}}>
-                  <div style={{color:"#666",fontSize:10,fontWeight:600,letterSpacing:"0.5px"}}>TOTAL</div>
-                  <div style={{color:"#4eff4e",fontSize:26,fontWeight:800,fontFamily:FM}}>{stats.total}</div>
+                <div style={{background:"#e8e2d6",border:"1px solid #ddd5c8",borderRadius:8,padding:"6px 4px",textAlign:"center"}}>
+                  <div style={{color:"#8a7e70",fontSize:10,fontWeight:600,letterSpacing:"0.5px"}}>TOTAL</div>
+                  <div style={{color:"#2d8a4e",fontSize:26,fontWeight:800,fontFamily:FN}}>{stats.total}</div>
                 </div>
-                <div style={{background:"rgba(68,221,255,0.04)",border:"1px solid rgba(68,221,255,0.1)",borderRadius:8,padding:"6px 4px",textAlign:"center"}}>
-                  <div style={{color:"#666",fontSize:10,fontWeight:600,letterSpacing:"0.5px"}}>UNIQUE</div>
-                  <div style={{color:"#44ddff",fontSize:26,fontWeight:800,fontFamily:FM}}>{ui.uniqueWordCount}</div>
+                <div style={{background:"#e8e2d6",border:"1px solid #ddd5c8",borderRadius:8,padding:"6px 4px",textAlign:"center"}}>
+                  <div style={{color:"#8a7e70",fontSize:10,fontWeight:600,letterSpacing:"0.5px"}}>UNIQUE</div>
+                  <div style={{color:"#2d8a4e",fontSize:26,fontWeight:800,fontFamily:FN}}>{ui.uniqueWordCount}</div>
                 </div>
-                <div style={{background:"rgba(255,215,0,0.04)",border:"1px solid rgba(255,215,0,0.1)",borderRadius:8,padding:"6px 4px",textAlign:"center"}}>
-                  <div style={{color:"#666",fontSize:10,fontWeight:600,letterSpacing:"0.5px"}}>BEST</div>
-                  <div style={{color:"#ffd700",fontSize:14,fontWeight:700,fontFamily:FM}}>{stats.best.word}</div>
-                  <div style={{color:"#886600",fontSize:10,fontWeight:500}}>+{stats.best.score}</div>
+                <div style={{background:"#e8e2d6",border:"1px solid #ddd5c8",borderRadius:8,padding:"6px 4px",textAlign:"center"}}>
+                  <div style={{color:"#8a7e70",fontSize:10,fontWeight:600,letterSpacing:"0.5px"}}>BEST</div>
+                  <div style={{color:"#c4842d",fontSize:14,fontWeight:700,fontFamily:FM}}>{stats.best.word}</div>
+                  <div style={{color:"#b0a090",fontSize:10,fontWeight:500}}>+{stats.best.score}</div>
                 </div>
-                <div style={{background:"rgba(204,102,255,0.04)",border:"1px solid rgba(204,102,255,0.1)",borderRadius:8,padding:"6px 4px",textAlign:"center"}}>
-                  <div style={{color:"#666",fontSize:10,fontWeight:600,letterSpacing:"0.5px"}}>LONGEST</div>
-                  <div style={{color:"#cc66ff",fontSize:14,fontWeight:700,fontFamily:FM}}>{stats.longest.word}</div>
-                  <div style={{color:"#663388",fontSize:10,fontWeight:500}}>{stats.longest.word.length} letters</div>
+                <div style={{background:"#e8e2d6",border:"1px solid #ddd5c8",borderRadius:8,padding:"6px 4px",textAlign:"center"}}>
+                  <div style={{color:"#8a7e70",fontSize:10,fontWeight:600,letterSpacing:"0.5px"}}>LONGEST</div>
+                  <div style={{color:"#9b2d6e",fontSize:14,fontWeight:700,fontFamily:FM}}>{stats.longest.word}</div>
+                  <div style={{color:"#b0a090",fontSize:10,fontWeight:500}}>{stats.longest.word.length} letters</div>
                 </div>
               </div>
             </div>
           )}
 
           {ui.wordsFormed.length>0&&(
-            <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",marginTop:12,paddingTop:10}}>
-              <div style={{color:"#777",fontSize:11,textAlign:"center",marginBottom:6,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase"}}>Recent</div>
+            <div style={{borderTop:"1px solid #ddd5c8",marginTop:12,paddingTop:10}}>
+              <div style={{color:"#8a7e70",fontSize:11,textAlign:"center",marginBottom:6,fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase"}}>Recent</div>
               <div style={{display:"flex",flexDirection:"column",gap:4}}>
                 {ui.wordsFormed.slice(-5).reverse().map((w,i)=>(
                   <div key={i} style={{fontSize:12,padding:"4px 8px",borderRadius:6,textAlign:"center",fontWeight:600,fontFamily:FM,letterSpacing:"0.5px",
-                    background:w.bounty?"rgba(255,215,0,0.06)":w.penalty?"rgba(255,68,68,0.06)":"rgba(78,255,78,0.06)",
-                    border:`1px solid ${w.bounty?"rgba(255,215,0,0.2)":w.penalty?"rgba(255,68,68,0.2)":"rgba(78,255,78,0.2)"}`,
-                    color:w.bounty?"#ffd700":w.penalty?"#ff5555":"#4eff4e"
-                  }}>{w.word}{w.combo>1?` x${w.combo}`:""}{w.bounty?" BOUNTY":""} +{w.score}</div>
+                    background:w.penalty?"#fdeaea":"#eaf5ee",
+                    border:`1px solid ${w.penalty?"#e8c0c0":"#c0dcc8"}`,
+                    color:w.penalty?"#c0392b":"#2d8a4e"
+                  }}>{w.word}{w.combo>1?` x${w.combo}`:""} +{w.score}</div>
                 ))}
               </div>
             </div>
@@ -801,20 +904,19 @@ export default function Game() {
       {ui.wordMode&&(
         <div style={{marginTop:14,display:"flex",gap:12,alignItems:"center"}}>
           <div style={{width:56,height:56,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",
-            fontSize:26,fontWeight:800,fontFamily:FM,
-            background:ui.wordTimeLeft<=3?"rgba(255,68,68,0.1)":"rgba(255,204,68,0.08)",
-            border:`3px solid ${ui.wordTimeLeft<=3?"#ff4444":"#ffcc44"}`,
-            color:ui.wordTimeLeft<=3?"#ff4444":"#ffcc44",
-            boxShadow:`0 0 20px ${ui.wordTimeLeft<=3?"rgba(255,68,68,0.2)":"rgba(255,204,68,0.15)"}`
+            fontSize:26,fontWeight:800,fontFamily:FN,
+            background:ui.wordTimeLeft<=3?"#fdeaea":"#eee8dd",
+            border:`3px solid ${ui.wordTimeLeft<=3?"#c0392b":"#c4842d"}`,
+            color:ui.wordTimeLeft<=3?"#c0392b":"#c4842d"
           }}>{ui.wordTimeLeft}</div>
           <input autoFocus value={ui.wordInput} onChange={e=>setUi(p=>({...p,wordInput:e.target.value.toUpperCase()}))}
             onKeyDown={e=>{if(e.key==="Enter")submitWord(ui.wordInput);if(e.key==="Escape")exitWordMode();}}
             placeholder="Type a word..."
-            style={{background:"rgba(255,255,255,0.03)",border:`2px solid ${ui.wordTimeLeft<=3?"#ff4444":"#ffcc44"}`,color:"#ffcc44",padding:"12px 18px",borderRadius:10,fontSize:22,fontFamily:FM,fontWeight:600,width:240,outline:"none",letterSpacing:"1px"}}/>
+            style={{background:"#fff",border:`2px solid ${ui.wordTimeLeft<=3?"#c0392b":"#c4842d"}`,color:"#3a3530",padding:"12px 18px",borderRadius:10,fontSize:22,fontFamily:FM,fontWeight:600,width:240,outline:"none",letterSpacing:"1px"}}/>
           <button onClick={()=>submitWord(ui.wordInput)}
-            style={{background:"#ffcc44",color:"#000",border:"none",padding:"12px 24px",borderRadius:10,fontSize:17,fontFamily:F,fontWeight:700,cursor:"pointer",letterSpacing:"-0.3px"}}>Submit</button>
+            style={{background:"#2d8a4e",color:"#f5f0e8",border:"none",padding:"12px 24px",borderRadius:10,fontSize:17,fontFamily:F,fontWeight:700,cursor:"pointer",letterSpacing:"-0.3px"}}>Submit</button>
           <button onClick={exitWordMode}
-            style={{background:"rgba(255,255,255,0.06)",color:"#888",border:"1px solid rgba(255,255,255,0.1)",padding:"12px 18px",borderRadius:10,fontSize:15,fontFamily:F,fontWeight:500,cursor:"pointer"}}>Esc</button>
+            style={{background:"#e0d8cc",color:"#5a5040",border:"1px solid #ddd5c8",padding:"12px 18px",borderRadius:10,fontSize:15,fontFamily:F,fontWeight:500,cursor:"pointer"}}>Esc</button>
         </div>
       )}
     </div>
