@@ -1,16 +1,51 @@
-# React + Vite
+# Snabble
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Snake meets Scrabble. Eat letters, form words, survive the chaos.
 
-Currently, two official plugins are available:
+**[Play Now](https://q502games-dev.github.io/Snabble/)**
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## How to Play
 
-## React Compiler
+- **Move** - Arrow keys or swipe (mobile)
+- **Word Mode** - Press W or tap the board (need 2+ letters)
+- **Boost** - Hold Up arrow or long-press (uses stored boosts)
+- **Restart** - Spacebar
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Rules
 
-## Expanding the ESLint configuration
+- Collect letters by eating them on the grid
+- Press W to enter Word Mode and type a word from your collected letters
+- Words that use at least half your snake length shrink the snake
+- Words too short grow the snake by unused letter count
+- Score enough points to advance through 8 levels
+- 5 minutes per level. Time's up = game over
+- Hitting a wall or yourself = game over
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Features
+
+- 8 progressively harder levels with walls, speed pads, portals, and pitfalls
+- AI enemy snake (from level 5) that hunts vowels
+- Falling letters to catch (from level 6)
+- Wildcard events with bonus star tiles
+- Combo multiplier for consecutive words
+- Perfect shed bonus (2x) for using all collected letters
+- Boost powerups granted over time
+- Lifeline pickups that shrink your snake
+- 16,800+ word dictionary
+
+## Tech
+
+Built with React + Vite. Deployed on GitHub Pages.
+
+## Development
+
+```bash
+npm install
+npm run dev
+```
+
+Open http://localhost:5173/Snabble/
+
+## License
+
+MIT
