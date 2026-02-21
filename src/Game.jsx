@@ -378,11 +378,13 @@ export default function Game() {
       else{nd=dy>0?DIR.DOWN:DIR.UP;}
       if(nd.x+g.dir.x!==0||nd.y+g.dir.y!==0)g.nextDir=nd;
     };
+    const tm=e=>{e.preventDefault();};
     const tc=()=>{if(longT){clearTimeout(longT);longT=null;}};
     el.addEventListener("touchstart",ts2,{passive:false});
+    el.addEventListener("touchmove",tm,{passive:false});
     el.addEventListener("touchend",te);
     el.addEventListener("touchcancel",tc);
-    return()=>{el.removeEventListener("touchstart",ts2);el.removeEventListener("touchend",te);el.removeEventListener("touchcancel",tc);};
+    return()=>{el.removeEventListener("touchstart",ts2);el.removeEventListener("touchmove",tm);el.removeEventListener("touchend",te);el.removeEventListener("touchcancel",tc);};
   },[initGame,onWordTimeout]);
 
   useEffect(()=>{
@@ -893,7 +895,7 @@ export default function Game() {
       {/* Main layout */}
       <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:isMobile?8:14,alignItems:isMobile?"center":"flex-start",position:"relative",width:"100%",maxWidth:GW+228}}>
         <div style={{position:"relative",flexShrink:0,width:isMobile?"100%":"auto",maxWidth:GW}}>
-          <canvas ref={cvs} width={GW} height={GH} style={{border:"2px solid #EDE3D4",borderRadius:10,display:"block",width:"100%",height:"auto"}}/>
+          <canvas ref={cvs} width={GW} height={GH} style={{border:"2px solid #EDE3D4",borderRadius:10,display:"block",width:"100%",height:"auto",touchAction:"none"}}/>
           {!ui.wordMode&&ui.feedback&&(ui.feedback.type==="grow"||ui.feedback.type==="shrink")&&(
             <div style={{position:"absolute",bottom:14,left:"50%",transform:"translateX(-50%)",
               display:"flex",alignItems:"center",gap:8,
