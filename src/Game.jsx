@@ -514,7 +514,7 @@ export default function Game() {
       if (g.level >= PITFALL_START_LEVEL) {
         if (now - g.lastPitfallSpawn >= PITFALL_SPAWN_INTERVAL) {
           g.lastPitfallSpawn = now;
-          const allowedTypes = g.level >= 4 ? PITFALL_TYPES : PITFALL_TYPES.filter(t => t !== "bomb");
+          const allowedTypes = g.level >= 6 ? PITFALL_TYPES : PITFALL_TYPES.filter(t => t !== "bomb");
           const ptype = allowedTypes[Math.floor(Math.random() * allowedTypes.length)];
           const pos = rP(occ(g));
           g.pitfalls.push({ x: pos.x, y: pos.y, type: ptype, spawn: now, morphed: false,
@@ -523,7 +523,7 @@ export default function Game() {
         g.pitfalls.forEach(pf => {
           if (!pf.morphed && now - pf.spawn >= PITFALL_MORPH_TIME) {
             pf.morphed = true;
-            const morphTypes = g.level >= 4 ? PITFALL_TYPES : PITFALL_TYPES.filter(t => t !== "bomb");
+            const morphTypes = g.level >= 6 ? PITFALL_TYPES : PITFALL_TYPES.filter(t => t !== "bomb");
             const others = morphTypes.filter(t => t !== pf.type);
             pf.type = others[Math.floor(Math.random() * others.length)];
             if (pf.type === "letter") pf.letter = rL(); else pf.letter = null;
@@ -882,7 +882,7 @@ export default function Game() {
               <div style={{color:"#C67B5C",fontWeight:700,marginBottom:8,fontSize:18,letterSpacing:"-0.5px"}}>Levels</div>
               <div><span style={{color:"#C67B5C"}}>5:00</span> <span style={{color:"#D4A574"}}>per level</span></div>
               <div><span style={{color:"#E8B84E"}}>Score</span> <span style={{color:"#D4A574"}}>target to advance</span></div>
-              <div><span style={{color:"#3E2723",fontWeight:600}}>10 levels</span> <span style={{color:"#D4A574"}}>total</span></div>
+              <div><span style={{color:"#3E2723",fontWeight:600}}>12 levels</span> <span style={{color:"#D4A574"}}>total</span></div>
             </div>
           </div>
         </div>
