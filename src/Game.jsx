@@ -17,7 +17,7 @@ const rP = (avoid)=>{let p,t=0;do{p={x:Math.floor(Math.random()*COLS),y:Math.flo
 const occ = g=>[...g.snake,...g.foods,...g.walls,...g.powerups,...g.speedPads,
   ...g.portals.flatMap(p=>[{x:p.x1,y:p.y1},{x:p.x2,y:p.y2}]),
   ...(g.aiSnake||[]),...(g.fallingLetters||[]),...(g.pitfalls||[])];
-const DICT_URL = "https://raw.githubusercontent.com/en-wl/wordlist/master/alt12dicts/3esl.txt";
+const DICT_URL = "https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt";
 
 const F = "'Fredoka', system-ui, sans-serif";
 const FM = "'Fredoka', system-ui, sans-serif";
