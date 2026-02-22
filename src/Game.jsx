@@ -9,7 +9,7 @@ import { COLS, ROWS, CELL, GW, GH, VOWELS, STICKY_SET, LW, SP, DIR, DIRS_ARR,
 
 let _nonVowelRun = 0;
 const rL = ()=>{
-  if(_nonVowelRun>=4){_nonVowelRun=0;const v="AEIOU";return v[Math.floor(Math.random()*v.length)];}
+  if(_nonVowelRun>=3){_nonVowelRun=0;const v="AEIOU";return v[Math.floor(Math.random()*v.length)];}
   const ch=LW[Math.floor(Math.random()*LW.length)];
   if(VOWELS.has(ch))_nonVowelRun=0;else _nonVowelRun++;
   return ch;
@@ -154,9 +154,8 @@ export default function Game() {
   },[]);
 
   const initGame = useCallback((lvl=0, keepScore=false)=>{
-    const prevSnake = keepScore && gs.current ? gs.current.snake.map(s=>({...s})) : null;
     const prevCollected = keepScore && gs.current ? [...gs.current.collected] : [];
-    const snake = prevSnake || (()=>{
+    const snake = (()=>{
       const arr=[];const sx=Math.floor(COLS/2),sy=Math.floor(ROWS/2);
       for(let i=0;i<2;i++)arr.push({x:sx-i,y:sy});return arr;
     })();
