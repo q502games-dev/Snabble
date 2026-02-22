@@ -446,7 +446,7 @@ export default function Game() {
       if(!g.currentEvent&&now-g.lastEventTime>=g.eventCooldown){
         const et=EVENT_TYPES[Math.floor(Math.random()*EVENT_TYPES.length)];
         g.currentEvent={type:et,start:now,end:now+EVENT_DUR[et]};g.lastEventTime=now;g.eventCooldown=45000+Math.random()*25000;
-        if(et==="wildcard"){g.foods.push({...rP(occ(g)),letter:"★",type:"wildcard"});}
+        if(et==="wildcard"){const wc=Math.random()<0.3?3:Math.random()<0.5?2:1;for(let wi=0;wi<wc;wi++)g.foods.push({...rP(occ(g)),letter:"★",type:"wildcard"});}
         setUi(p=>({...p,event:et,eventTimer:Math.ceil(EVENT_DUR[et]/1000)}));
       }
       if(g.currentEvent){
