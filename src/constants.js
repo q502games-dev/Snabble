@@ -5,23 +5,25 @@ export const SP = {A:1,B:3,C:3,D:2,E:1,F:4,G:2,H:4,I:1,J:8,K:5,L:1,M:3,N:1,O:1,P
 export const DIR = {UP:{x:0,y:-1},DOWN:{x:0,y:1},LEFT:{x:-1,y:0},RIGHT:{x:1,y:0}};
 export const DIRS_ARR = [DIR.UP, DIR.DOWN, DIR.LEFT, DIR.RIGHT];
 export const LEVELS = [
-  {target:500,spd:250,walls:0,pads:1,portals:0},
-  {target:1200,spd:235,walls:1,pads:2,portals:1},
-  {target:2000,spd:220,walls:2,pads:3,portals:1},
-  {target:3200,spd:205,walls:3,pads:3,portals:2},
-  {target:5000,spd:190,walls:4,pads:4,portals:2},
-  {target:7000,spd:175,walls:5,pads:4,portals:3},
-  {target:9500,spd:160,walls:6,pads:5,portals:3},
-  {target:12000,spd:145,walls:8,pads:5,portals:4},
+  {target:400,spd:260,walls:0,pads:1,portals:0},
+  {target:900,spd:245,walls:1,pads:2,portals:0},
+  {target:1500,spd:235,walls:1,pads:2,portals:1},
+  {target:2200,spd:225,walls:2,pads:3,portals:1},
+  {target:3200,spd:215,walls:2,pads:3,portals:2},
+  {target:4500,spd:200,walls:3,pads:4,portals:2},
+  {target:6000,spd:185,walls:4,pads:4,portals:2},
+  {target:8000,spd:170,walls:5,pads:5,portals:3},
+  {target:10500,spd:155,walls:6,pads:5,portals:3},
+  {target:13000,spd:140,walls:8,pads:5,portals:4},
 ];
 export const WORD_TIMER = 10;
 export const LEVEL_DURATION = 300;
-export const AI_START_LEVEL = 4;
-export const FALLING_START_LEVEL = 5;
+export const AI_START_LEVEL = 5;
+export const FALLING_START_LEVEL = 6;
 export const BOOST_INTERVAL = 25000;
 export const BOOST_DURATION = 3000;
 export const BOOST_SPEED_MULT = 0.4;
-export const PITFALL_START_LEVEL = 2;
+export const PITFALL_START_LEVEL = 3;
 export const PITFALL_SPAWN_INTERVAL = 6000;
 export const PITFALL_MORPH_TIME = 4000;
 export const PITFALL_TYPES = ["speed","bomb","letter"];
