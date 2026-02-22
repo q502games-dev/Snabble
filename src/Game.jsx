@@ -5,6 +5,7 @@ import { COLS, ROWS, CELL, GW, GH, VOWELS, STICKY_SET, LW, SP, DIR, DIRS_ARR,
   PITFALL_SPAWN_INTERVAL, PITFALL_MORPH_TIME, PITFALL_TYPES, FALLING_SPAWN_INTERVAL,
   FALLING_SPEED, PORTAL_REPOSITION_INTERVAL, EVENT_TYPES, EVENT_DUR
 } from "./constants.js";
+// import SnabbleBot from "./SnabbleBot.js";
 
 let _nonVowelRun = 0;
 const rL = ()=>{
@@ -97,6 +98,8 @@ export default function Game() {
   const wtRef = useRef(null);
   const dictRef = useRef(null);
   const wordInputRef = useRef(null);
+  // const botRef = useRef(null);
+  // const [botActive, setBotActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadStatus, setLoadStatus] = useState("Fetching dictionary...");
   const [ui, setUi] = useState({
@@ -303,9 +306,29 @@ export default function Game() {
     }
   }, [ui.wordMode]);
 
+  // // Stop bot on game over
+  // useEffect(()=>{
+  //   if(ui.gameOver && botRef.current){botRef.current.stop();setBotActive(false);}
+  // },[ui.gameOver]);
+
   const boostTimerRef = useRef(null);
   useEffect(()=>{
-    const h=e=>{const g=gs.current;if(!g||g.gameOver){if(e.key===" "&&g?.gameOver){e.preventDefault();initGame(0);}return;}
+    const h=e=>{
+      // if(e.key==="b"||e.key==="B"){
+      //   e.preventDefault();
+      //   setBotActive(prev=>{
+      //     const next=!prev;
+      //     if(next){
+      //       if(!botRef.current) botRef.current=new SnabbleBot(gs,dictRef,submitWord,exitWordMode,setUi);
+      //       botRef.current.start();
+      //     }else{
+      //       if(botRef.current) botRef.current.stop();
+      //     }
+      //     return next;
+      //   });
+      //   return;
+      // }
+      const g=gs.current;if(!g||g.gameOver){if(e.key===" "&&g?.gameOver){e.preventDefault();initGame(0);}return;}
       if(g.wordMode){if(e.key==="Escape")exitWordMode();return;}
       if(e.key==="w"||e.key==="W"){
         if(g.collected.length<2){g.banner={msg:"Need at least 2 letters",time:performance.now()+2000};return;}
@@ -451,7 +474,9 @@ export default function Game() {
       }
       if(g.stickyUntil>0&&now>=g.stickyUntil){g.stickyUntil=0;if(g.boostActiveUntil<=0)g.speed=g.baseSpeed;setUi(p=>({...p,stickyTimer:0,stickyLetter:""}));}
       if(g.stickyUntil>0)setUi(p=>({...p,stickyTimer:Math.max(0,Math.ceil((g.stickyUntil-now)/1000))}));
-      if(g.walls.length>0&&now-g.wallLastMove>=g.wallMoveInterval){g.wallLastMove=now;g.walls.forEach(w=>{w.x=(w.x+w.dx+COLS)%COLS;});}
+      if(g.walls.length>0&&now-g.wallLastMove>=g.wallMoveInterval){g.wallLastMove=now;g.walls.forEach(w=>{w.x=(w.x+w.dx+COLS)%COLS;});
+        if(g.walls.some(w=>g.snake.some(s=>s.x===w.x&&s.y===w.y))){g.gameOver=true;g.gameOverTime=now;setUi(p=>({...p,gameOver:true,gameOverReason:"Crushed by a wall!"}));draw(ts);raf.current=requestAnimationFrame(tick);return;}
+      }
 
       const lifeChance = g.level <= 1 ? 0.65 : g.level <= 2 ? 0.5 : g.level <= 3 ? 0.4 : Math.max(0.1, 0.3 - g.level * 0.03);
       const lifelineCooldown = 18000 + g.level * 6000 + Math.random() * (10000 + g.level * 5000);
@@ -489,7 +514,8 @@ export default function Game() {
       if (g.level >= PITFALL_START_LEVEL) {
         if (now - g.lastPitfallSpawn >= PITFALL_SPAWN_INTERVAL) {
           g.lastPitfallSpawn = now;
-          const ptype = PITFALL_TYPES[Math.floor(Math.random() * PITFALL_TYPES.length)];
+          const allowedTypes = g.level >= 3 ? PITFALL_TYPES : PITFALL_TYPES.filter(t => t !== "bomb");
+          const ptype = allowedTypes[Math.floor(Math.random() * allowedTypes.length)];
           const pos = rP(occ(g));
           g.pitfalls.push({ x: pos.x, y: pos.y, type: ptype, spawn: now, morphed: false,
             letter: ptype === "letter" ? rL() : null });
@@ -497,7 +523,8 @@ export default function Game() {
         g.pitfalls.forEach(pf => {
           if (!pf.morphed && now - pf.spawn >= PITFALL_MORPH_TIME) {
             pf.morphed = true;
-            const others = PITFALL_TYPES.filter(t => t !== pf.type);
+            const morphTypes = g.level >= 3 ? PITFALL_TYPES : PITFALL_TYPES.filter(t => t !== "bomb");
+            const others = morphTypes.filter(t => t !== pf.type);
             pf.type = others[Math.floor(Math.random() * others.length)];
             if (pf.type === "letter") pf.letter = rL(); else pf.letter = null;
           }
@@ -872,6 +899,7 @@ export default function Game() {
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",background:"#f5f0ea",minHeight:"100vh",overflow:"auto",fontFamily:F,color:"#3E2723",padding:isMobile?"6px 4px":"12px"}}>
       {/* Stats bar — level and score in matching boxes */}
       <div style={{display:"flex",gap:12,marginBottom:10,justifyContent:"center",alignItems:"center"}}>
+        {/* {botActive&&<div style={{background:"#c0392b",color:"#fff",borderRadius:8,padding:"6px 14px",fontSize:13,fontWeight:800,fontFamily:FN,letterSpacing:"2px",animation:"pulse 1s infinite alternate"}}>BOT</div>} */}
         <div style={{background:"#f0e8dc",border:"1px solid #EDE3D4",borderRadius:10,padding:"6px 20px",textAlign:"center",minWidth:100}}>
           <div style={{color:"#D4A574",fontSize:14,fontWeight:700,letterSpacing:"1px",textTransform:"uppercase"}}>Level</div>
           <div style={{color:"#C67B5C",fontSize:28,fontWeight:800,fontFamily:FN}}>{ui.level}</div>
